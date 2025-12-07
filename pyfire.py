@@ -18,7 +18,7 @@
 from argparse import ArgumentParser
 from time import sleep
 import asyncio
-import time
+import signal
 import os
 
 from scipy.signal import convolve2d as conv2d
@@ -90,11 +90,6 @@ assert args.clip > 0, "--clip must be at least 1"
 # Terminal Constants and ANSI Codes
 ################################################################################
 
-TERMSIZE = os.get_terminal_size()
-WIDTH = TERMSIZE[0]
-HEIGHT = TERMSIZE[1] + args.clip
-MARGIN = args.margin
-
 HIDE_CURSOR = "\x1b[?25l"
 SHOW_CURSOR = "\x1b[?25h"
 CLEAR = "\x1b[H"
@@ -147,23 +142,36 @@ KERNEL = (KERNEL / KERNEL.sum()) * args.alpha
 # Main
 ################################################################################
 
+SIGWINCH = False
 
-async def generate(queue: asyncio.Queue):
 
-    heatmap = np.zeros((HEIGHT, WIDTH))
+def sigwinch():
+    global SIGWINCH
+    SIGWINCH = True
+
+
+async def run_generate(queue: asyncio.Queue):
+    global SIGWINCH
+
+    while True:
+        SIGWINCH = False
+        width, height = os.get_terminal_size()
+        await generate(width, height, queue)
+
+
+async def generate(width: int, height: int, queue: asyncio.Queue):
+
+    heatmap = np.zeros((height + args.clip, width))
 
     ignitions = None
     hashes = {}
     cache = []
 
-    start_time = time.perf_counter()
-
     if args.cache:
-        # cache = np.zeros((int(args.cache * 1.5), HEIGHT, WIDTH))
-        seeds = args.strength * abs(rand(args.cache, WIDTH - (2 * MARGIN)))
+        seeds = args.strength * abs(rand(args.cache, width - (2 * args.margin)))
         seed_idx = 0
 
-    while True:
+    while not SIGWINCH:
         heatmap[:-1] = conv2d(
             heatmap, KERNEL, mode="same", boundary="fill", fillvalue=0.0
         )[:-1]
@@ -174,14 +182,14 @@ async def generate(queue: asyncio.Queue):
         )
 
         if not args.cache:
-            seed = args.strength * abs(rand(1, WIDTH - (2 * MARGIN)))
+            seed = args.strength * abs(rand(1, width - (2 * args.margin)))
         else:
             seed = seeds[seed_idx]
             seed_idx += 1
             if seed_idx == args.cache:
                 seed_idx = 0
 
-        heatmap[-1][MARGIN:-MARGIN] = seed
+        heatmap[-1][args.margin : -args.margin] = seed
 
         chars = to_chars(np.floor(heatmap * 10))
         frame = "\n".join(["".join(d) for d in chars.tolist()[: -args.clip]])
@@ -199,18 +207,19 @@ async def generate(queue: asyncio.Queue):
         await queue.put(frame)
 
     if not cache:
-        end_time = time.perf_counter()
-        elapsed_time = end_time - start_time
         return
 
-    while True:
+    while not SIGWINCH:
         for frame in cache:
             await queue.put(frame)
 
 
 async def amain():
     queue = asyncio.Queue(maxsize=args.buffer)
-    generator = asyncio.create_task(generate(queue))
+    generator = asyncio.create_task(run_generate(queue))
+
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGWINCH, lambda: sigwinch())
 
     while True:
         frame = await queue.get()
