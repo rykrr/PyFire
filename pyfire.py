@@ -84,6 +84,7 @@ arg_parser.add_argument(
 )
 args = arg_parser.parse_args()
 
+assert 0 <= args.strength and args.strength <= 1, "--strength must be in [0,1]"
 assert args.clip > 0, "--clip must be at least 1"
 
 
@@ -129,7 +130,7 @@ to_chars = np.vectorize(lambda i: CHARS[int(i)], otypes=[str])
 KERNEL = np.array(
     [
         [1, 2, 3, 2, 1],
-        [1, 3, 4, 3, 1],
+        [1, 0, 4, 0, 1],
         [0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0],
@@ -196,8 +197,9 @@ async def generate(width: int, height: int, queue: asyncio.Queue):
 
         if args.cache:
             h = hash(frame)
-            if h in hashes and len(hashes) > 5:
-                cache = cache[hashes[h] + 1 :]
+            if h in hashes and len(hashes) > args.clip:
+                index = cache.index(frame)
+                cache = cache[index:]
                 assert cache[0] == frame
                 break
 
