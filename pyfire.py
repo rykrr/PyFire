@@ -74,7 +74,7 @@ arg_parser.add_argument(
     "--margin", type=int, default=5, help="Margins from side"
 )
 arg_parser.add_argument(
-    "--mode", type=str, default="fade", help="Choose charset"
+    "--mode", type=str, default="dither", help="Choose charset"
 )
 arg_parser.add_argument(
     "--buffer", type=int, default=10, help="Render buffer size"
