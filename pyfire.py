@@ -22,7 +22,7 @@ import signal
 import os
 
 from scipy.signal import convolve2d as conv2d
-from numpy.random import rand
+from numpy.random import rand, normal
 import numpy as np
 
 
@@ -63,6 +63,19 @@ arg_parser.add_argument(
     type=float,
     default=5,
     help="Cooling coefficient (make cold regions colder)",
+)
+arg_parser.add_argument(
+    "-B",
+    "--bias",
+    type=float,
+    default=0.0,
+    help="",
+)
+arg_parser.add_argument(
+    "--bias-dist",
+    type=float,
+    default=0.2,
+    help="",
 )
 arg_parser.add_argument(
     "--clip",
@@ -168,8 +181,14 @@ async def generate(width: int, height: int, queue: asyncio.Queue):
     hashes = {}
     cache = []
 
+    # Playing around with density curves to shape the flame
+    x = np.linspace(-1, 1, width - (2 * args.margin))
+    bias = (1 - args.bias_dist * x ** 2) ** 3
+
     if args.cache:
-        seeds = args.strength * abs(rand(args.cache, width - (2 * args.margin)))
+        seeds = abs(rand(args.cache, width - (2 * args.margin)))
+        seeds = (args.bias * bias) + (1 - args.bias) * seeds
+        seeds *= args.strength
         seed_idx = 0
 
     while not SIGWINCH:
@@ -183,7 +202,16 @@ async def generate(width: int, height: int, queue: asyncio.Queue):
         )
 
         if not args.cache:
-            seed = args.strength * abs(rand(1, width - (2 * args.margin)))
+            # Default noise
+            seed = abs(rand(1, width - (2 * args.margin)))
+
+            # Add shape flame
+            #seed = ((1 - args.bias) * seed) + args.bias * (0.25 + (0.75 * bias) * seed )
+            seed = (args.bias * bias) + (1 - args.bias) * seed
+
+            # Adjust flame strength
+            seed *= args.strength
+            seed = np.clip(seed, 0, 0.9999)
         else:
             seed = seeds[seed_idx]
             seed_idx += 1
