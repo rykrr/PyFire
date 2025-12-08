@@ -19,6 +19,7 @@ from argparse import ArgumentParser
 from time import sleep
 import asyncio
 import signal
+import time
 import os
 
 from scipy.signal import convolve2d as conv2d
@@ -31,69 +32,57 @@ import numpy as np
 
 arg_parser = ArgumentParser()
 arg_parser.add_argument(
-    "-t", "--timing", type=float, default=0.03, help="Frame time in seconds"
+    "-t", "--timing", type=float, default=0.04, help="Frame time in seconds"
 )
 arg_parser.add_argument(
     "-s", "--strength", type=float, default=1.0, help="Maximum fire strength"
 )
 arg_parser.add_argument(
-    "-a",
-    "--alpha",
+    "-k",
+    "--kernel-coefficient",
     type=float,
     default=1.0,
     help="Constant applied to kernel for decay",
 )
 arg_parser.add_argument(
-    "-b",
-    "--beta",
-    type=float,
-    default=1.0,
-    help="Constant applied to the entire heatmap",
-)
-arg_parser.add_argument(
-    "-e",
-    "--epsilon",
-    type=float,
-    default=1.0,
-    help="Balance between (-ab) and (-d) coefficients (default 100% -d)",
-)
-arg_parser.add_argument(
     "-d",
-    "--delta",
+    "--decay",
     type=float,
-    default=5,
-    help="Cooling coefficient (make cold regions colder)",
+    default=7,
+    help="Decay coefficient; Lower values make colder regions decay faster",
 )
 arg_parser.add_argument(
-    "-B",
+    "-b",
     "--bias",
     type=float,
-    default=0.0,
-    help="",
+    default=0.25,
+    help="Balance between random (0) and shaped (1) flames",
 )
 arg_parser.add_argument(
-    "--bias-dist",
+    "-f",
+    "--flatten",
     type=float,
-    default=0.2,
-    help="",
+    default=0.4,
+    help="Controls how flat the shaped flame is; lower is flatter",
 )
 arg_parser.add_argument(
+    "-c",
     "--clip",
     type=int,
-    default=3,
+    default=7,
     help="Remove the bottom n rows (they're too chaotic)",
 )
 arg_parser.add_argument(
     "--margin", type=int, default=5, help="Margins from side"
 )
 arg_parser.add_argument(
-    "--mode", type=str, default="dither", help="Choose charset"
+    "--mode", type=str, default="numbers", help="Choose character set"
 )
 arg_parser.add_argument(
-    "--buffer", type=int, default=10, help="Render buffer size"
+    "--buffer", type=int, default=16, help="Render buffer size"
 )
 arg_parser.add_argument(
-    "--cache", type=int, default=0, help="Use a fixed set of ignitions"
+    "--cache", type=int, default=0, help="Use a fixed set of ignition seeds"
 )
 args = arg_parser.parse_args()
 
@@ -150,7 +139,7 @@ KERNEL = np.array(
     ]
 )
 
-KERNEL = (KERNEL / KERNEL.sum()) * args.alpha
+KERNEL = (KERNEL / KERNEL.sum()) * args.kernel_coefficient
 
 
 # Main
@@ -183,7 +172,7 @@ async def generate(width: int, height: int, queue: asyncio.Queue):
 
     # Playing around with density curves to shape the flame
     x = np.linspace(-1, 1, width - (2 * args.margin))
-    bias = (1 - args.bias_dist * x ** 2) ** 3
+    bias = (1 - args.flatten * x ** 2) ** 3
 
     if args.cache:
         seeds = abs(rand(args.cache, width - (2 * args.margin)))
@@ -195,11 +184,8 @@ async def generate(width: int, height: int, queue: asyncio.Queue):
         heatmap[:-1] = conv2d(
             heatmap, KERNEL, mode="same", boundary="fill", fillvalue=0.0
         )[:-1]
-        heatmap *= args.beta
 
-        heatmap = (1 - args.epsilon) * heatmap + (
-            args.epsilon * heatmap * np.tanh(args.delta * heatmap)
-        )
+        heatmap *= np.tanh(args.decay * heatmap)
 
         if not args.cache:
             # Default noise
